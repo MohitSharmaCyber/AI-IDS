@@ -1,36 +1,41 @@
 from datetime import datetime
 import time
 
-from detection.flow_generator.flow import Flow
+from detection.packet_capture.packet import Packet
+from detection.flow_generator.flow_manager import FlowManager
 
-flow = Flow(
-    flow_id="FLOW-001",
-    src_ip="192.168.1.100",
-    dst_ip="8.8.8.8",
-    src_port=50000,
-    dst_port=443,
-    protocol="TCP",
-    start_time=datetime.now(),
-    end_time=datetime.now(),
-)
+manager = FlowManager()
 
-print("Initial Flow")
-print(flow.summary())
+for size in [100, 250, 500, 1200]:
 
-for size in [100, 500, 1200]:
+    packet = Packet(
+        timestamp=datetime.now(),
+        interface="Wi-Fi",
+        src_ip="192.168.1.100",
+        dst_ip="8.8.8.8",
+        src_port=50000,
+        dst_port=443,
+        protocol="TCP",
+        packet_size=size,
+        payload_size=size-20,
+        ttl=64,
+        tcp_flags="S"
+    )
+
+    flow = manager.process_packet(packet)
 
     time.sleep(1)
 
-    flow.end_time = datetime.now()
+print()
 
-    flow.update(size)
+print("Total Active Flows :", manager.total_flows())
 
 print()
 
-print("Updated Flow")
+for f in manager.get_active_flows().values():
 
-print(flow.summary())
+    print(f.summary())
 
-print()
+    print()
 
-print(flow.to_dict())
+    print(f.to_dict())
