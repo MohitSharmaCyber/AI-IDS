@@ -1,13 +1,7 @@
 """
-flow_manager.py
-
-Manages active network flows.
-
-Author: Mohit Sharma
-Project: AI-Powered Intrusion Detection System
+Enterprise Flow Manager
 """
 
-from datetime import datetime
 from threading import Lock
 
 from detection.flow_generator.flow import Flow
@@ -15,43 +9,46 @@ from detection.packet_capture.packet import Packet
 
 
 class FlowManager:
-    """
-    Creates and updates active flows.
-    """
 
     def __init__(self):
 
-        self.flows = {}
-
         self.lock = Lock()
 
-    @staticmethod
-    def generate_flow_key(packet: Packet):
-        """
-        Generates a unique flow key.
-        """
+        self.flows = {}
 
-        return (
+        self.flow_counter = 1
+
+    @staticmethod
+    def generate_key(packet: Packet):
+
+        forward = (
             packet.src_ip,
-            packet.dst_ip,
             packet.src_port,
+            packet.dst_ip,
             packet.dst_port,
             packet.protocol,
         )
 
-    def process_packet(self, packet: Packet) -> Flow:
-        """
-        Create or update a flow.
-        """
+        backward = (
+            packet.dst_ip,
+            packet.dst_port,
+            packet.src_ip,
+            packet.src_port,
+            packet.protocol,
+        )
 
-        key = self.generate_flow_key(packet)
+        return min(forward, backward)
+
+    def process_packet(self, packet: Packet):
+
+        key = self.generate_key(packet)
 
         with self.lock:
 
             if key not in self.flows:
 
-                flow = Flow(
-                    flow_id=f"FLOW-{len(self.flows)+1:06}",
+                self.flows[key] = Flow(
+                    flow_id=f"FLOW-{self.flow_counter:06}",
                     src_ip=packet.src_ip,
                     dst_ip=packet.dst_ip,
                     src_port=packet.src_port,
@@ -61,11 +58,22 @@ class FlowManager:
                     end_time=packet.timestamp,
                 )
 
-                self.flows[key] = flow
+                self.flow_counter += 1
 
             flow = self.flows[key]
 
             flow.end_time = packet.timestamp
+
+            if (
+                packet.src_ip == flow.src_ip
+                and packet.src_port == flow.src_port
+            ):
+
+                flow.forward_packets += 1
+
+            else:
+
+                flow.backward_packets += 1
 
             flow.update(packet.packet_size)
 
