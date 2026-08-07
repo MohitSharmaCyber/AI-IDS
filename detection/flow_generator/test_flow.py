@@ -2,47 +2,35 @@ from datetime import datetime
 import time
 
 from detection.flow_generator.flow_manager import FlowManager
+from detection.flow_generator.feature_extractor import FeatureExtractor
 from detection.packet_capture.packet import Packet
 
 manager = FlowManager()
 
 traffic = [
-
-    ("192.168.1.100",50000,"8.8.8.8",443),
-
-    ("192.168.1.100",50000,"8.8.8.8",443),
-
-    ("8.8.8.8",443,"192.168.1.100",50000),
-
-    ("192.168.1.100",50000,"8.8.8.8",443),
-
-    ("8.8.8.8",443,"192.168.1.100",50000),
+    ("192.168.1.100", 50000, "8.8.8.8", 443),
+    ("192.168.1.100", 50000, "8.8.8.8", 443),
+    ("8.8.8.8", 443, "192.168.1.100", 50000),
+    ("192.168.1.100", 50000, "8.8.8.8", 443),
+    ("8.8.8.8", 443, "192.168.1.100", 50000),
 ]
 
-for src,sport,dst,dport in traffic:
+# Different packet sizes for realistic traffic
+sizes = [60, 1500, 350, 1200, 800]
+
+for i, (src, sport, dst, dport) in enumerate(traffic):
 
     packet = Packet(
-
         timestamp=datetime.now(),
-
         interface="Wi-Fi",
-
         src_ip=src,
-
         dst_ip=dst,
-
         src_port=sport,
-
         dst_port=dport,
-
         protocol="TCP",
-
-        packet_size=500,
-
-        payload_size=480,
-
+        packet_size=sizes[i],
+        payload_size=sizes[i] - 20,
         ttl=64,
-
         tcp_flags="A",
     )
 
@@ -63,11 +51,10 @@ for flow in manager.get_active_flows().values():
     print()
 
     print(flow.to_dict())
-    from detection.flow_generator.feature_extractor import FeatureExtractor
 
-print("\nML Features\n")
+    print("\nML Features\n")
 
-features = FeatureExtractor.extract(flow)
+    features = FeatureExtractor.extract(flow)
 
-for key, value in features.items():
-    print(f"{key:25}: {value}")
+    for key, value in features.items():
+        print(f"{key:25}: {value}")
