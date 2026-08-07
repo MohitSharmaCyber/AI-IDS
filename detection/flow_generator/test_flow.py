@@ -63,3 +63,11 @@ for flow in manager.get_active_flows().values():
     print()
 
     print(flow.to_dict())
+    from detection.flow_generator.feature_extractor import FeatureExtractor
+
+print("\nML Features\n")
+
+features = FeatureExtractor.extract(flow)
+
+for key, value in features.items():
+    print(f"{key:25}: {value}")

@@ -37,7 +37,6 @@ class Flow:
     # --------------------------
 
     start_time: datetime
-
     end_time: datetime
 
     # --------------------------
@@ -45,11 +44,9 @@ class Flow:
     # --------------------------
 
     packet_count: int = 0
-
     total_bytes: int = 0
 
     forward_packets: int = 0
-
     backward_packets: int = 0
 
     average_packet_size: float = 0.0
@@ -57,8 +54,15 @@ class Flow:
     duration: float = 0.0
 
     packets_per_second: float = 0.0
-
     bytes_per_second: float = 0.0
+
+    # --------------------------
+    # Raw Packet Data
+    # --------------------------
+
+    packet_sizes: list[int] = field(default_factory=list)
+    packet_times: list[datetime] = field(default_factory=list)
+    tcp_flags_history: list[str] = field(default_factory=list)
 
     # --------------------------
     # ML Fields
@@ -78,14 +82,26 @@ class Flow:
     # Utility Methods
     # --------------------------
 
-    def update(self, packet_size: int) -> None:
+    def update(
+        self,
+        packet_size: int,
+        timestamp: Optional[datetime] = None,
+        tcp_flags: Optional[str] = None,
+    ) -> None:
         """
         Update statistics when a new packet
         is added to the flow.
         """
 
-        self.packet_count += 1
+        self.packet_sizes.append(packet_size)
 
+        if timestamp is not None:
+            self.packet_times.append(timestamp)
+
+        if tcp_flags is not None:
+            self.tcp_flags_history.append(tcp_flags)
+
+        self.packet_count += 1
         self.total_bytes += packet_size
 
         self.average_packet_size = (
@@ -113,7 +129,9 @@ class Flow:
         return asdict(self)
 
     def summary(self) -> str:
-
+        """
+        Return a short summary of the flow.
+        """
         return (
             f"{self.src_ip}:{self.src_port} -> "
             f"{self.dst_ip}:{self.dst_port} | "

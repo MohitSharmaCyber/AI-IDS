@@ -75,7 +75,11 @@ class FlowManager:
 
                 flow.backward_packets += 1
 
-            flow.update(packet.packet_size)
+            flow.update(
+    packet_size=packet.packet_size,
+    timestamp=packet.timestamp,
+    tcp_flags=packet.tcp_flags,
+)
 
             return flow
 
