@@ -1,7 +1,13 @@
 """
+feature_extractor.py
+
 Enterprise Feature Extraction Engine
 
-Extracts ML-ready statistical features from a Flow.
+Extracts machine-learning ready features
+from a completed network flow.
+
+Author: Mohit Sharma
+Project: AI-Powered Intrusion Detection System
 """
 
 from statistics import (
@@ -12,42 +18,46 @@ from statistics import (
 )
 
 from detection.flow_generator.flow import Flow
+from detection.flow_generator.tcp_analyzer import TCPAnalyzer
 
 
 class FeatureExtractor:
+    """
+    Converts a Flow object into a machine-learning
+    feature vector.
+    """
 
     @staticmethod
-    def extract(flow: Flow):
+    def extract(flow: Flow) -> dict:
+        """
+        Extract statistical and TCP features from a flow.
+        """
 
         sizes = flow.packet_sizes
 
         features = {
 
-            # ------------------------
+            # =====================================================
             # Flow Statistics
-            # ------------------------
+            # =====================================================
 
             "duration": flow.duration,
-
             "packet_count": flow.packet_count,
-
             "total_bytes": flow.total_bytes,
 
             "forward_packets": flow.forward_packets,
-
             "backward_packets": flow.backward_packets,
 
-            # ------------------------
+            # =====================================================
             # Throughput
-            # ------------------------
+            # =====================================================
 
             "packets_per_second": flow.packets_per_second,
-
             "bytes_per_second": flow.bytes_per_second,
 
-            # ------------------------
-            # Packet Statistics
-            # ------------------------
+            # =====================================================
+            # Packet Size Statistics
+            # =====================================================
 
             "min_packet_size":
                 min(sizes) if sizes else 0,
@@ -70,5 +80,15 @@ class FeatureExtractor:
             "average_packet_size":
                 flow.average_packet_size,
         }
+
+        # =====================================================
+        # TCP Flag Features
+        # =====================================================
+
+        tcp_features = TCPAnalyzer.analyze(
+            flow.tcp_flags_history
+        )
+
+        features.update(tcp_features)
 
         return features
