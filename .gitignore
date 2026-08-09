@@ -38,3 +38,5 @@ dist/
 
 # Environment
 .env.local
+# Generated project inspection
+project_structure.txt
