@@ -10,6 +10,8 @@ Project: AI-Powered Intrusion Detection System
 
 from detection.anomaly_detector.scorer import AnomalyScorer
 from detection.anomaly_detector.severity import SeverityClassifier
+from detection.anomaly_detector.attack_classifier import AttackClassifier
+
 from detection.flow_generator.flow import Flow
 from detection.flow_generator.feature_extractor import FeatureExtractor
 from detection.ml_detector.ml_engine import MLEngine
@@ -24,21 +26,13 @@ class AnomalyDetector:
         - TCP behavior analysis
         - Traffic analysis
         - Machine-learning anomaly detection
-
-    The final score is converted into a severity level
-    and attack classification.
+        - Attack classification
     """
 
     def __init__(
         self,
         ml_engine: MLEngine | None = None,
     ):
-        """
-        Args:
-            ml_engine:
-                Optional trained MLEngine instance.
-        """
-
         self.ml_engine = ml_engine
 
     # ============================================================
@@ -47,6 +41,9 @@ class AnomalyDetector:
 
     @staticmethod
     def statistical_score(features: dict) -> float:
+        """
+        Calculate anomaly score based on packet statistics.
+        """
 
         score = 0.0
 
@@ -67,6 +64,16 @@ class AnomalyDetector:
 
     @staticmethod
     def tcp_score(features: dict) -> float:
+        """
+        Detect suspicious TCP flag behavior.
+
+        Signals:
+            - SYN-heavy traffic
+            - SYN packets without ACK responses
+            - Elevated RST ratio
+            - Repeated SYN attempts
+            - One-way TCP probing
+        """
 
         score = 0.0
 
@@ -85,14 +92,50 @@ class AnomalyDetector:
             0,
         )
 
+        ack_count = features.get(
+            "ack_count",
+            0,
+        )
+
+        backward_packets = features.get(
+            "backward_packets",
+            0,
+        )
+
+        # --------------------------------------------------------
+        # SYN-heavy traffic
+        # --------------------------------------------------------
+
+        if syn_count >= 3:
+            score += 0.30
+
+        # --------------------------------------------------------
+        # Multiple SYNs with no ACK response
+        # --------------------------------------------------------
+
+        if syn_count >= 3 and ack_count == 0:
+            score += 0.30
+
+        # --------------------------------------------------------
+        # SYN / ACK imbalance
+        # --------------------------------------------------------
+
         if syn_ack_ratio > 1.0:
-            score += 0.40
+            score += 0.20
 
-        if rst_ratio > 0.2:
-            score += 0.30
+        # --------------------------------------------------------
+        # RST activity
+        # --------------------------------------------------------
 
-        if syn_count >= 5:
-            score += 0.30
+        if rst_ratio >= 0.20:
+            score += 0.20
+
+        # --------------------------------------------------------
+        # One-way TCP probing
+        # --------------------------------------------------------
+
+        if syn_count >= 3 and backward_packets == 0:
+            score += 0.20
 
         return min(score, 1.0)
 
@@ -102,6 +145,9 @@ class AnomalyDetector:
 
     @staticmethod
     def traffic_score(features: dict) -> float:
+        """
+        Calculate anomaly score based on traffic volume.
+        """
 
         score = 0.0
 
@@ -115,11 +161,19 @@ class AnomalyDetector:
             0.0,
         )
 
+        # --------------------------------------------------------
+        # Packet rate
+        # --------------------------------------------------------
+
         if packets_per_second > 100:
             score += 0.50
 
         elif packets_per_second > 50:
             score += 0.30
+
+        # --------------------------------------------------------
+        # Byte rate
+        # --------------------------------------------------------
 
         if bytes_per_second > 1_000_000:
             score += 0.50
@@ -136,8 +190,6 @@ class AnomalyDetector:
     def ml_score(self, flow: Flow) -> float:
         """
         Get anomaly score from the trained ML engine.
-
-        If no ML engine is configured, returns 0.0.
         """
 
         if self.ml_engine is None:
@@ -156,39 +208,36 @@ class AnomalyDetector:
     def classify_attack(
         features: dict,
         final_score: float,
-    ) -> str:
+        severity: str = "Normal",
+    ) -> dict:
+        """
+        Classify the network flow.
 
-        syn_count = features.get(
-            "syn_count",
-            0,
+        Returns:
+            attack_type
+            mitre_technique
+            label
+        """
+
+        classification = AttackClassifier.classify_with_details(
+            features=features,
+            anomaly_score=final_score,
+            severity=severity,
         )
 
-        rst_ratio = features.get(
-            "rst_ratio",
-            0.0,
-        )
+        # Safety fallback
+        if classification is None:
+            return {
+                "attack_type": None,
+                "mitre_technique": None,
+                "label": (
+                    "Malicious"
+                    if final_score >= 0.7
+                    else "Benign"
+                ),
+            }
 
-        packets_per_second = features.get(
-            "packets_per_second",
-            0.0,
-        )
-
-        if syn_count >= 5:
-            return "TCP SYN Scan"
-
-        if rst_ratio > 0.2:
-            return "TCP Reset Activity"
-
-        if packets_per_second > 100:
-            return "High Traffic Anomaly"
-
-        if final_score >= 0.9:
-            return "Unknown Anomaly"
-
-        if final_score >= 0.7:
-            return "Suspicious Activity"
-
-        return "Normal Traffic"
+        return classification
 
     # ============================================================
     # FULL FLOW ANALYSIS
@@ -197,28 +246,7 @@ class AnomalyDetector:
     def analyze(self, flow: Flow) -> Flow:
         """
         Perform complete anomaly analysis.
-
-        Pipeline:
-
-            Flow
-              ↓
-            Features
-              ↓
-            Statistical
-            TCP
-            Traffic
-            ML
-              ↓
-            Final Score
-              ↓
-            Severity
-              ↓
-            Attack Classification
         """
-
-        # --------------------------------------------------------
-        # Feature extraction
-        # --------------------------------------------------------
 
         features = FeatureExtractor.extract(flow)
 
@@ -254,7 +282,7 @@ class AnomalyDetector:
         )
 
         # --------------------------------------------------------
-        # Severity
+        # Severity classification
         # --------------------------------------------------------
 
         severity = SeverityClassifier.classify(
@@ -265,28 +293,35 @@ class AnomalyDetector:
         # Attack classification
         # --------------------------------------------------------
 
-        attack_type = self.classify_attack(
+        classification = self.classify_attack(
             features,
             final_score,
+            severity,
         )
 
         # --------------------------------------------------------
-        # Update Flow
+        # Update Flow object
         # --------------------------------------------------------
 
         flow.anomaly_score = final_score
 
         flow.severity = severity
 
-        if attack_type == "Normal Traffic":
-            flow.attack_type = None
-        else:
-            flow.attack_type = attack_type
+        flow.attack_type = classification.get(
+            "attack_type"
+        )
 
-        flow.label = (
-            "Attack"
-            if final_score >= 0.7
-            else "Benign"
+        flow.mitre_technique = classification.get(
+            "mitre_technique"
+        )
+
+        flow.label = classification.get(
+            "label",
+            (
+                "Malicious"
+                if final_score >= 0.7
+                else "Benign"
+            ),
         )
 
         return flow
@@ -300,11 +335,27 @@ class AnomalyDetector:
         flow: Flow,
     ) -> dict:
         """
-        Return complete detection information,
-        including individual scoring components.
+        Return complete detection information.
+
+        Includes:
+            - Statistical score
+            - TCP score
+            - Traffic score
+            - ML score
+            - Final anomaly score
+            - Severity
+            - Attack type
+            - MITRE technique
+            - Label
         """
 
-        features = FeatureExtractor.extract(flow)
+        features = FeatureExtractor.extract(
+            flow
+        )
+
+        # --------------------------------------------------------
+        # Individual detection signals
+        # --------------------------------------------------------
 
         statistical = self.statistical_score(
             features
@@ -322,6 +373,10 @@ class AnomalyDetector:
             flow
         )
 
+        # --------------------------------------------------------
+        # Combined anomaly score
+        # --------------------------------------------------------
+
         final_score = AnomalyScorer.calculate(
             statistical_score=statistical,
             tcp_score=tcp,
@@ -329,30 +384,55 @@ class AnomalyDetector:
             ml_score=ml,
         )
 
+        # --------------------------------------------------------
+        # Severity classification
+        # --------------------------------------------------------
+
         severity = SeverityClassifier.classify(
             final_score
         )
 
-        attack_type = self.classify_attack(
+        # --------------------------------------------------------
+        # Attack classification
+        # --------------------------------------------------------
+
+        classification = self.classify_attack(
             features,
             final_score,
+            severity,
         )
+
+        # --------------------------------------------------------
+        # Return complete breakdown
+        # --------------------------------------------------------
 
         return {
             "statistical_score": statistical,
+
             "tcp_score": tcp,
+
             "traffic_score": traffic,
+
             "ml_score": ml,
+
             "final_score": final_score,
+
             "severity": severity,
-            "attack_type": (
-                None
-                if attack_type == "Normal Traffic"
-                else attack_type
+
+            "attack_type": classification.get(
+                "attack_type"
             ),
-            "label": (
-                "Attack"
-                if final_score >= 0.7
-                else "Benign"
+
+            "mitre_technique": classification.get(
+                "mitre_technique"
+            ),
+
+            "label": classification.get(
+                "label",
+                (
+                    "Malicious"
+                    if final_score >= 0.7
+                    else "Benign"
+                ),
             ),
         }

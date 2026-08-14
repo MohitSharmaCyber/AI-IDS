@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from detection.anomaly_detector.detector import AnomalyDetector
 from detection.flow_generator.flow import Flow
 from detection.ml_detector.ml_engine import MLEngine
+from detection.flow_generator.feature_extractor import FeatureExtractor
 
 
 def create_flow(
@@ -139,6 +140,16 @@ def main():
         [40, 1500, 64, 1500, 32],
         ["S", "S", "S", "S", "R"],
     )
+    print()
+    print("ANOMALOUS FLOW FEATURES")
+    print("-" * 70)
+
+    features = FeatureExtractor.extract(anomalous_flow)
+
+    for key, value in features.items():
+        print(f"{key:30}: {value}")
+
+
 
     anomalous_result = detector.analyze_with_breakdown(
         anomalous_flow
