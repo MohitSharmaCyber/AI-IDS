@@ -17,11 +17,11 @@ class AnomalyScorer:
 
     # Default weights
     WEIGHTS = {
-        "statistical": 0.30,
-        "tcp": 0.20,
-        "traffic": 0.20,
-        "ml": 0.30,
-    }
+    "statistical": 0.25,
+    "tcp": 0.35,
+    "traffic": 0.15,
+    "ml": 0.25,
+}
 
     @classmethod
     def calculate(
