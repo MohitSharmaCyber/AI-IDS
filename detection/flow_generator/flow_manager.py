@@ -24,6 +24,7 @@ class FlowManager:
         - Maintain bidirectional flows
         - Update flow statistics
         - Track forward/backward traffic
+        - Track destination ports
         - Detect expired flows
         - Return completed flows
     """
@@ -92,7 +93,10 @@ class FlowManager:
 
         with self.lock:
 
+            # ----------------------------------------------------
             # Create new flow
+            # ----------------------------------------------------
+
             if key not in self.flows:
 
                 self.flows[key] = Flow(
@@ -108,13 +112,19 @@ class FlowManager:
 
                 self.flow_counter += 1
 
+            # ----------------------------------------------------
             # Get existing flow
+            # ----------------------------------------------------
+
             flow = self.flows[key]
 
             # Update end timestamp
             flow.end_time = packet.timestamp
 
+            # ----------------------------------------------------
             # Direction tracking
+            # ----------------------------------------------------
+
             if (
                 packet.src_ip == flow.src_ip
                 and packet.src_port == flow.src_port
@@ -123,11 +133,15 @@ class FlowManager:
             else:
                 flow.backward_packets += 1
 
+            # ----------------------------------------------------
             # Update statistics
+            # ----------------------------------------------------
+
             flow.update(
                 packet_size=packet.packet_size,
                 timestamp=packet.timestamp,
                 tcp_flags=packet.tcp_flags,
+                dst_port=packet.dst_port,
             )
 
             return flow

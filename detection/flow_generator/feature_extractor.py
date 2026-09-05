@@ -30,16 +30,34 @@ class FeatureExtractor:
     @staticmethod
     def extract(flow: Flow) -> dict:
         """
-        Extract statistical and TCP features from a flow.
+        Extract statistical, TCP, and behavioral
+        features from a flow.
         """
 
         sizes = flow.packet_sizes
+        dst_ports = flow.dst_ports_history
+
+        # =====================================================
+        # Destination Port Behavioral Features
+        # =====================================================
+
+        unique_dst_ports = len(set(dst_ports))
+
+        port_diversity = (
+            unique_dst_ports / len(dst_ports)
+            if dst_ports
+            else 0.0
+        )
+
+        # =====================================================
+        # Flow Features
+        # =====================================================
 
         features = {
 
-            # =====================================================
+            # -------------------------------------------------
             # Flow Statistics
-            # =====================================================
+            # -------------------------------------------------
 
             "duration": flow.duration,
             "packet_count": flow.packet_count,
@@ -48,16 +66,16 @@ class FeatureExtractor:
             "forward_packets": flow.forward_packets,
             "backward_packets": flow.backward_packets,
 
-            # =====================================================
+            # -------------------------------------------------
             # Throughput
-            # =====================================================
+            # -------------------------------------------------
 
             "packets_per_second": flow.packets_per_second,
             "bytes_per_second": flow.bytes_per_second,
 
-            # =====================================================
+            # -------------------------------------------------
             # Packet Size Statistics
-            # =====================================================
+            # -------------------------------------------------
 
             "min_packet_size":
                 min(sizes) if sizes else 0,
@@ -79,6 +97,13 @@ class FeatureExtractor:
 
             "average_packet_size":
                 flow.average_packet_size,
+
+            # -------------------------------------------------
+            # Destination Port Behavior
+            # -------------------------------------------------
+
+            "unique_dst_ports": unique_dst_ports,
+            "port_diversity": port_diversity,
         }
 
         # =====================================================

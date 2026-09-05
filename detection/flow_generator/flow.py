@@ -64,6 +64,10 @@ class Flow:
     packet_times: list[datetime] = field(default_factory=list)
     tcp_flags_history: list[str] = field(default_factory=list)
 
+    # NEW:
+    # Stores destination port for every packet in the flow.
+    dst_ports_history: list[int] = field(default_factory=list)
+
     # --------------------------
     # ML Fields
     # --------------------------
@@ -87,6 +91,7 @@ class Flow:
         packet_size: int,
         timestamp: Optional[datetime] = None,
         tcp_flags: Optional[str] = None,
+        dst_port: Optional[int] = None,
     ) -> None:
         """
         Update statistics when a new packet
@@ -101,12 +106,18 @@ class Flow:
         if tcp_flags is not None:
             self.tcp_flags_history.append(tcp_flags)
 
+        if dst_port is not None:
+            self.dst_ports_history.append(dst_port)
+
         self.packet_count += 1
         self.total_bytes += packet_size
 
         self.average_packet_size = (
             self.total_bytes / self.packet_count
         )
+
+        if timestamp is not None:
+            self.end_time = timestamp
 
         self.duration = (
             self.end_time - self.start_time
