@@ -334,7 +334,13 @@ class AttackClassifier:
     ) -> Dict:
         """
         Return attack classification together with
-        MITRE ATT&CK mapping and malicious label.
+        MITRE ATT&CK mapping and security label.
+
+        Labels:
+
+            Benign
+            Suspicious
+            Malicious
         """
 
         attack_type = AttackClassifier.classify(
@@ -347,11 +353,28 @@ class AttackClassifier:
             attack_type
         )
 
-        label = (
-            "Malicious"
-            if attack_type is not None
-            else "Benign"
-        )
+        # --------------------------------------------------------
+        # SECURITY LABEL
+        # --------------------------------------------------------
+        #
+        # Specific attack detected
+        #     -> Malicious
+        #
+        # No specific attack but suspicious behavior
+        #     -> Suspicious
+        #
+        # Normal behavior
+        #     -> Benign
+        #
+
+        if attack_type is not None:
+            label = "Malicious"
+
+        elif severity == "Suspicious":
+            label = "Suspicious"
+
+        else:
+            label = "Benign"
 
         return {
             "attack_type": attack_type,
