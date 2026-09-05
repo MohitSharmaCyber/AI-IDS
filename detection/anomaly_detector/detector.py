@@ -70,18 +70,44 @@ class AnomalyDetector:
     def statistical_score(features: dict) -> float:
         """
         Calculate anomaly score based on packet statistics.
+
+        The statistical detector focuses on genuinely unusual
+        packet-size behavior rather than normal TCP connection
+        establishment.
         """
 
         score = 0.0
 
-        if features.get("min_packet_size", 0) < 64:
-            score += 0.25
+        min_packet_size = features.get(
+            "min_packet_size",
+            0,
+        )
 
-        if features.get("std_packet_size", 0) > 500:
+        std_packet_size = features.get(
+            "std_packet_size",
+            0.0,
+        )
+
+        max_packet_size = features.get(
+            "max_packet_size",
+            0,
+        )
+
+        # Very small packets can be suspicious, but do not
+        # immediately classify a flow as anomalous.
+        if 0 < min_packet_size < 40:
+            score += 0.15
+
+        # Extremely large packet-size variation.
+        if std_packet_size > 700:
             score += 0.20
 
-        if features.get("max_packet_size", 0) > 1400:
-            score += 0.15
+        elif std_packet_size > 500:
+            score += 0.10
+
+        # Very large packets.
+        if max_packet_size > 1500:
+            score += 0.10
 
         return min(score, 1.0)
 
@@ -93,54 +119,128 @@ class AnomalyDetector:
     def tcp_score(features: dict) -> float:
         """
         Detect suspicious TCP flag behavior.
+
+        Important:
+            Normal TCP connections frequently contain SYN,
+            ACK and RST packets. Therefore a SYN or RST packet
+            by itself is NOT considered malicious.
+
+        Stronger combinations are required before assigning
+        a significant TCP anomaly score.
         """
 
         score = 0.0
 
-        syn_ack_ratio = features.get(
-            "syn_ack_ratio",
-            0.0,
+        syn_ack_ratio = float(
+            features.get(
+                "syn_ack_ratio",
+                0.0,
+            )
         )
 
-        rst_ratio = features.get(
-            "rst_ratio",
-            0.0,
+        rst_ratio = float(
+            features.get(
+                "rst_ratio",
+                0.0,
+            )
         )
 
-        syn_count = features.get(
-            "syn_count",
-            0,
+        syn_count = int(
+            features.get(
+                "syn_count",
+                0,
+            )
         )
 
-        ack_count = features.get(
-            "ack_count",
-            0,
+        ack_count = int(
+            features.get(
+                "ack_count",
+                0,
+            )
         )
 
-        backward_packets = features.get(
-            "backward_packets",
-            0,
+        rst_count = int(
+            features.get(
+                "rst_count",
+                0,
+            )
         )
 
-        # SYN-heavy traffic
-        if syn_count >= 3:
+        backward_packets = int(
+            features.get(
+                "backward_packets",
+                0,
+            )
+        )
+
+        packet_count = int(
+            features.get(
+                "packet_count",
+                0,
+            )
+        )
+
+        # --------------------------------------------------------
+        # Very strong SYN-heavy behavior
+        # --------------------------------------------------------
+        #
+        # A few SYN packets are normal.
+        # Require a larger number and lack of ACK responses.
+        #
+        if syn_count >= 10 and ack_count == 0:
+            score += 0.45
+
+        elif syn_count >= 6 and ack_count == 0:
+            score += 0.25
+
+        # --------------------------------------------------------
+        # Strong SYN/ACK imbalance
+        # --------------------------------------------------------
+        #
+        # Do not penalize small flows.
+        #
+        if (
+            syn_count >= 6
+            and packet_count >= 10
+            and syn_ack_ratio >= 5.0
+        ):
+            score += 0.25
+
+        # --------------------------------------------------------
+        # Repeated failed TCP connections
+        # --------------------------------------------------------
+        #
+        # RST is only suspicious when it appears repeatedly
+        # together with multiple SYN attempts.
+        #
+        if (
+            syn_count >= 5
+            and rst_count >= 3
+            and rst_ratio >= 0.30
+            and backward_packets <= 2
+        ):
             score += 0.30
 
-        # Multiple SYNs with no ACK response
-        if syn_count >= 3 and ack_count == 0:
+        elif (
+            syn_count >= 4
+            and rst_count >= 2
+            and rst_ratio >= 0.40
+        ):
+            score += 0.15
+
+        # --------------------------------------------------------
+        # One-way probing
+        # --------------------------------------------------------
+        #
+        # Only consider this suspicious when there are several
+        # SYN attempts. A single outbound connection is normal.
+        #
+        if (
+            syn_count >= 8
+            and backward_packets == 0
+            and ack_count == 0
+        ):
             score += 0.30
-
-        # SYN / ACK imbalance
-        if syn_ack_ratio > 1.0:
-            score += 0.20
-
-        # RST activity
-        if rst_ratio >= 0.20:
-            score += 0.20
-
-        # One-way TCP probing
-        if syn_count >= 3 and backward_packets == 0:
-            score += 0.20
 
         return min(score, 1.0)
 
@@ -152,33 +252,52 @@ class AnomalyDetector:
     def traffic_score(features: dict) -> float:
         """
         Calculate anomaly score based on traffic volume.
+
+        High traffic rates are retained as strong indicators
+        because they are useful for detecting flooding and DoS.
         """
 
         score = 0.0
 
-        packets_per_second = features.get(
-            "packets_per_second",
-            0.0,
+        packets_per_second = float(
+            features.get(
+                "packets_per_second",
+                0.0,
+            )
         )
 
-        bytes_per_second = features.get(
-            "bytes_per_second",
-            0.0,
+        bytes_per_second = float(
+            features.get(
+                "bytes_per_second",
+                0.0,
+            )
         )
 
+        # --------------------------------------------------------
         # Packet rate
+        # --------------------------------------------------------
+
         if packets_per_second > 100:
             score += 0.50
 
         elif packets_per_second > 50:
             score += 0.30
 
+        elif packets_per_second > 25:
+            score += 0.10
+
+        # --------------------------------------------------------
         # Byte rate
+        # --------------------------------------------------------
+
         if bytes_per_second > 1_000_000:
             score += 0.50
 
         elif bytes_per_second > 500_000:
             score += 0.30
+
+        elif bytes_per_second > 250_000:
+            score += 0.10
 
         return min(score, 1.0)
 
@@ -214,17 +333,9 @@ class AnomalyDetector:
         behavior = self.behavior_tracker.update(flow)
 
         return {
-            # ----------------------------------------------------
-            # Primary behavioral score
-            # ----------------------------------------------------
-
             "behavior_scan_score": (
                 behavior.scan_score
             ),
-
-            # ----------------------------------------------------
-            # Basic behavior statistics
-            # ----------------------------------------------------
 
             "behavior_total_flows": (
                 behavior.total_flows
@@ -246,10 +357,6 @@ class AnomalyDetector:
                 behavior.unique_destination_port_count
             ),
 
-            # ----------------------------------------------------
-            # Fan-out metrics
-            # ----------------------------------------------------
-
             "behavior_destination_ip_fanout": (
                 behavior.destination_ip_fanout
             ),
@@ -257,10 +364,6 @@ class AnomalyDetector:
             "behavior_destination_port_fanout": (
                 behavior.destination_port_fanout
             ),
-
-            # ----------------------------------------------------
-            # Temporal / rate metrics
-            # ----------------------------------------------------
 
             "behavior_observation_duration": (
                 behavior.observation_duration
@@ -278,10 +381,6 @@ class AnomalyDetector:
                 behavior.byte_rate
             ),
 
-            # ----------------------------------------------------
-            # TCP behavior
-            # ----------------------------------------------------
-
             "behavior_tcp_flows": (
                 behavior.tcp_flows
             ),
@@ -297,10 +396,6 @@ class AnomalyDetector:
             "behavior_failed_connection_flows": (
                 behavior.failed_connection_flows
             ),
-
-            # ----------------------------------------------------
-            # TCP ratios
-            # ----------------------------------------------------
 
             "behavior_syn_flow_ratio": (
                 behavior.syn_flow_ratio
@@ -385,6 +480,10 @@ class AnomalyDetector:
         """
         Combine the existing anomaly score with the
         host-level behavioral score.
+
+        Behavioral scores are allowed to raise the final
+        score because host-level scanning is an important
+        detection signal.
         """
 
         return min(
@@ -443,8 +542,6 @@ class AnomalyDetector:
             flow
         )
 
-        # Add behavioral intelligence to
-        # classification features.
         features.update(
             behavioral
         )
@@ -497,7 +594,6 @@ class AnomalyDetector:
         # --------------------------------------------------------
 
         flow.anomaly_score = final_score
-
         flow.severity = severity
 
         flow.attack_type = classification.get(
@@ -531,17 +627,9 @@ class AnomalyDetector:
         Return complete detection information.
         """
 
-        # --------------------------------------------------------
-        # Feature extraction
-        # --------------------------------------------------------
-
         features = FeatureExtractor.extract(
             flow
         )
-
-        # --------------------------------------------------------
-        # Individual detection signals
-        # --------------------------------------------------------
 
         statistical = self.statistical_score(
             features
@@ -559,10 +647,6 @@ class AnomalyDetector:
             flow
         )
 
-        # --------------------------------------------------------
-        # Host-level behavioral analysis
-        # --------------------------------------------------------
-
         behavioral = self.behavioral_analysis(
             flow
         )
@@ -576,10 +660,6 @@ class AnomalyDetector:
             0.0,
         )
 
-        # --------------------------------------------------------
-        # Existing anomaly score
-        # --------------------------------------------------------
-
         base_score = AnomalyScorer.calculate(
             statistical_score=statistical,
             tcp_score=tcp,
@@ -587,26 +667,14 @@ class AnomalyDetector:
             ml_score=ml,
         )
 
-        # --------------------------------------------------------
-        # Combined score
-        # --------------------------------------------------------
-
         final_score = self.combine_behavior_score(
             base_score=base_score,
             behavior_score=behavior_score,
         )
 
-        # --------------------------------------------------------
-        # Severity
-        # --------------------------------------------------------
-
         severity = SeverityClassifier.classify(
             final_score
         )
-
-        # --------------------------------------------------------
-        # Attack classification
-        # --------------------------------------------------------
 
         classification = self.classify_attack(
             features=features,
@@ -614,31 +682,15 @@ class AnomalyDetector:
             severity=severity,
         )
 
-        # --------------------------------------------------------
-        # Complete breakdown
-        # --------------------------------------------------------
-
         return {
-            # ====================================================
             # Detection scores
-            # ====================================================
-
             "statistical_score": statistical,
-
             "tcp_score": tcp,
-
             "traffic_score": traffic,
-
             "ml_score": ml,
+            "behavior_scan_score": behavior_score,
 
-            "behavior_scan_score": (
-                behavior_score
-            ),
-
-            # ====================================================
             # Behavioral statistics
-            # ====================================================
-
             "behavior_total_flows": behavioral.get(
                 "behavior_total_flows",
                 0,
@@ -674,10 +726,7 @@ class AnomalyDetector:
                 0.0,
             ),
 
-            # ====================================================
             # Behavioral temporal metrics
-            # ====================================================
-
             "behavior_observation_duration": behavioral.get(
                 "behavior_observation_duration",
                 0.0,
@@ -698,10 +747,7 @@ class AnomalyDetector:
                 0.0,
             ),
 
-            # ====================================================
             # TCP behavioral metrics
-            # ====================================================
-
             "behavior_tcp_flows": behavioral.get(
                 "behavior_tcp_flows",
                 0,
@@ -737,14 +783,9 @@ class AnomalyDetector:
                 0.0,
             ),
 
-            # ====================================================
-            # Final detection result
-            # ====================================================
-
+            # Final result
             "base_score": base_score,
-
             "final_score": final_score,
-
             "severity": severity,
 
             "attack_type": classification.get(

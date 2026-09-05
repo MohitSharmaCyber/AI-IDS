@@ -1,41 +1,54 @@
 """
 Host-Level Behavioral Tracking Engine
 
-Tracks network behavior across multiple flows from the same
-source IP and extracts behavioral indicators useful for IDS
-detection.
+Tracks directional network behavior across multiple flows.
 
-Current behavioral indicators:
-    - Unique destination IPs
-    - Unique destination ports
-    - Total flows
-    - Total packets
-    - Total bytes
-    - TCP flows
-    - SYN flows
-    - RST flows
-    - Failed connections
-    - Connection failure ratio
-    - Port scan score
-    - Destination IP fan-out
-    - Destination port fan-out
-    - Flow rate
-    - Packet rate
-    - Byte rate
+The tracker distinguishes between:
+    - outbound behavior: local/source host -> remote destination
+    - inbound behavior: remote source -> local destination
+
+Port-scan detection is based primarily on OUTBOUND behavior because
+a traditional port scan is a source host contacting many destination
+service ports.
+
+This prevents normal return traffic such as:
+
+    remote_server:443 -> local_host:50307
+    remote_server:443 -> local_host:50310
+    remote_server:443 -> local_host:50313
+
+from being incorrectly interpreted as a port scan.
 
 Author: Mohit Sharma
 Project: AI-Powered Intrusion Detection System
 """
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime
+from ipaddress import ip_address
 from typing import Optional
 
+
+# ================================================================
+# Host Behavior
+# ================================================================
 
 @dataclass
 class HostBehavior:
     """
     Behavioral profile for a single source IP.
+
+    The profile is directional.
+
+    For outbound traffic:
+        source = tracked host
+        destination ports = remote service ports
+
+    For inbound traffic:
+        source = remote host
+        destination ports = local ephemeral/service ports
+
+    Port-scan scoring only uses outbound destination-port behavior.
     """
 
     src_ip: str
@@ -73,14 +86,14 @@ class HostBehavior:
         """
 
         now = (
-            flow.end_time
-            or flow.start_time
+            getattr(flow, "end_time", None)
+            or getattr(flow, "start_time", None)
             or datetime.now()
         )
 
         if self.first_seen is None:
             self.first_seen = (
-                flow.start_time
+                getattr(flow, "start_time", None)
                 or now
             )
 
@@ -122,7 +135,7 @@ class HostBehavior:
 
         if dst_ip:
             self.unique_destination_ips.add(
-                dst_ip
+                str(dst_ip)
             )
 
         dst_port = getattr(
@@ -132,9 +145,12 @@ class HostBehavior:
         )
 
         if dst_port is not None:
-            self.unique_destination_ports.add(
-                int(dst_port)
-            )
+            try:
+                self.unique_destination_ports.add(
+                    int(dst_port)
+                )
+            except (TypeError, ValueError):
+                pass
 
         # --------------------------------------------------------
         # TCP behavior
@@ -176,16 +192,15 @@ class HostBehavior:
                 for flag in tcp_flags
             )
 
-            # SYN flow means a flow containing SYN without
-            # a completed SYN/ACK handshake.
+            # SYN flow means SYN activity without
+            # observing a completed SYN/ACK exchange.
             if has_syn and not has_syn_ack:
                 self.syn_flows += 1
 
             if has_rst:
                 self.rst_flows += 1
 
-            # A simple failed-connection indicator:
-            # SYN activity followed by RST is treated as
+            # SYN followed by RST is treated as
             # a failed connection attempt.
             if has_syn and has_rst:
                 self.failed_connection_flows += 1
@@ -245,7 +260,7 @@ class HostBehavior:
     @property
     def observation_duration(self) -> float:
         """
-        Duration of the observed behavior in seconds.
+        Duration of observed behavior in seconds.
         """
 
         if (
@@ -259,13 +274,14 @@ class HostBehavior:
             - self.first_seen
         ).total_seconds()
 
-        return max(duration, 0.0)
+        return max(
+            duration,
+            0.0,
+        )
 
     @property
     def flow_rate(self) -> float:
-        """
-        Number of flows per second.
-        """
+        """Number of flows per second."""
 
         duration = self.observation_duration
 
@@ -281,9 +297,7 @@ class HostBehavior:
 
     @property
     def packet_rate(self) -> float:
-        """
-        Number of packets per second.
-        """
+        """Number of packets per second."""
 
         duration = self.observation_duration
 
@@ -299,9 +313,7 @@ class HostBehavior:
 
     @property
     def byte_rate(self) -> float:
-        """
-        Number of bytes per second.
-        """
+        """Number of bytes per second."""
 
         duration = self.observation_duration
 
@@ -321,9 +333,7 @@ class HostBehavior:
 
     @property
     def connection_failure_ratio(self) -> float:
-        """
-        Ratio of failed connections to total TCP flows.
-        """
+        """Ratio of failed connections to TCP flows."""
 
         if self.tcp_flows == 0:
             return 0.0
@@ -336,9 +346,7 @@ class HostBehavior:
 
     @property
     def syn_flow_ratio(self) -> float:
-        """
-        Ratio of SYN flows to TCP flows.
-        """
+        """Ratio of SYN flows to TCP flows."""
 
         if self.tcp_flows == 0:
             return 0.0
@@ -351,9 +359,7 @@ class HostBehavior:
 
     @property
     def rst_flow_ratio(self) -> float:
-        """
-        Ratio of RST flows to TCP flows.
-        """
+        """Ratio of RST flows to TCP flows."""
 
         if self.tcp_flows == 0:
             return 0.0
@@ -371,14 +377,26 @@ class HostBehavior:
     @property
     def scan_score(self) -> float:
         """
-        Calculate a behavioral port-scan score.
+        Calculate behavioral port-scan score.
 
-        Indicators:
-            - Destination port diversity
-            - Destination IP diversity
-            - Flow volume
-            - SYN activity
-            - Connection failures
+        The score represents:
+
+            source host
+                |
+                +----> many destination ports
+                |
+                +----> many destination IPs
+                |
+                +----> high flow volume
+                |
+                +----> SYN-heavy activity
+                |
+                +----> connection failures
+
+        Important:
+            This profile represents a source host, so the
+            destination-port diversity is meaningful for
+            outbound scanning.
 
         Score range:
             0.0 - 1.0
@@ -486,11 +504,9 @@ class HostBehavior:
                 else None
             ),
 
-            "observation_duration": (
-                round(
-                    self.observation_duration,
-                    4,
-                )
+            "observation_duration": round(
+                self.observation_duration,
+                4,
             ),
 
             "total_flows": self.total_flows,
@@ -564,12 +580,16 @@ class HostBehavior:
         }
 
 
+# ================================================================
+# Behavior Tracker
+# ================================================================
+
 class BehaviorTracker:
     """
     Tracks HostBehavior objects using source IP addresses.
 
-    A sliding time window is used to prevent old activity from
-    permanently influencing current behavioral decisions.
+    A sliding time window prevents old activity from permanently
+    influencing current behavioral decisions.
     """
 
     def __init__(
@@ -600,7 +620,7 @@ class BehaviorTracker:
 
     def update(
         self,
-        flow: Flow,
+        flow,
     ) -> HostBehavior:
         """
         Add a flow to the appropriate source-IP profile.
@@ -618,6 +638,8 @@ class BehaviorTracker:
             raise ValueError(
                 "Flow must contain a valid src_ip"
             )
+
+        src_ip = str(src_ip)
 
         if src_ip not in self.hosts:
             self.hosts[src_ip] = HostBehavior(
@@ -735,7 +757,7 @@ class BehaviorTracker:
 
     def get_window_seconds(self) -> int:
         """
-        Return the configured behavioral window.
+        Return configured behavioral window.
         """
 
         return self.window_seconds
